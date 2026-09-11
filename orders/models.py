@@ -21,7 +21,7 @@ class Order(models.Model):
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
         related_name="orders",
-        limit_choices_to={"role": "buyer"},
+        limit_choices_to={"role": "BUYER"},
     )
 
     status = models.CharField(
