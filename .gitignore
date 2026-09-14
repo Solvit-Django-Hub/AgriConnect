@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+
+# Django migrations
+accounts/migrations/*.py
+!accounts/migrations/__init__.py
+farmers/migrations/*.py
+!farmers/migrations/__init__.py
+buyers/migrations/*.py
+!buyers/migrations/__init__.py
+orders/migrations/*.py
+!orders/migrations/__init__.py
+
+# Environment & database
+venv/
+.env
+db.sqlite3
