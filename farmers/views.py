@@ -1,3 +1,4 @@
+from django.contrib.auth import get_user_model
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -6,6 +7,8 @@ from rest_framework.views import APIView
 from .models import Product
 from .serializers import ProductSerializer
 
+
+User = get_user_model()
 
 class ProductListCreateView(APIView):
     permission_classes = [IsAuthenticated]
@@ -17,7 +20,7 @@ class ProductListCreateView(APIView):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def post(self, request):
-        if request.user.role != "FARMER":
+        if request.user.role != User.FARMER:
             return Response(
                 {"detail": "Only farmers can create products."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -57,7 +60,7 @@ class ProductDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if request.user.role != "FARMER":
+        if request.user.role != User.FARMER:
             return Response(
                 {"detail": "Only farmers can update products."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -93,7 +96,7 @@ class ProductDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if request.user.role != "FARMER":
+        if request.user.role != User.FARMER:
             return Response(
                 {"detail": "Only farmers can update products."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -133,7 +136,7 @@ class ProductDetailView(APIView):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if request.user.role != "FARMER":
+        if request.user.role != User.FARMER:
             return Response(
                 {"detail": "Only farmers can delete products."},
                 status=status.HTTP_403_FORBIDDEN,
