@@ -1,5 +1,7 @@
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -7,7 +9,13 @@ from rest_framework.views import APIView
 from farmers.models import Product
 
 from .models import Order, OrderItem
-from .serializers import OrderPlacementSerializer
+from .serializers import (
+    BuyerOrderSerializer,
+    OrderPlacementSerializer,
+)
+
+
+User = get_user_model()
 
 
 class OrderPlacementView(APIView):
@@ -80,4 +88,74 @@ class OrderPlacementView(APIView):
                 "price_at_order": product.price_per_unit,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class BuyerOrderPagination(PageNumberPagination):
+    page_size = 10
+
+
+class BuyerOrderListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role != User.BUYER:
+            return Response(
+                {"detail": "Only buyers can view order history."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        orders = (
+            Order.objects
+            .filter(buyer=request.user)
+            .prefetch_related("items__product")
+            .order_by("-created_at")
+        )
+
+        paginator = BuyerOrderPagination()
+        page = paginator.paginate_queryset(orders, request)
+
+        serializer = BuyerOrderSerializer(
+            page,
+            many=True,
+            context={"request": request},
+        )
+
+        return paginator.get_paginated_response(serializer.data)
+
+
+class BuyerOrderDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, order_id):
+        if request.user.role != User.BUYER:
+            return Response(
+                {"detail": "Only buyers can view order details."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            order = (
+                Order.objects
+                .filter(
+                    id=order_id,
+                    buyer=request.user,
+                )
+                .prefetch_related("items__product")
+                .get()
+            )
+        except Order.DoesNotExist:
+            return Response(
+                {"detail": "Order not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = BuyerOrderSerializer(
+            order,
+            context={"request": request},
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
         )
