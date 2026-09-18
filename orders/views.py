@@ -1,3 +1,4 @@
+from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
@@ -10,11 +11,13 @@ from .models import Order, OrderItem
 from .serializers import OrderPlacementSerializer
 
 
+User =get_user_model()
+
 class OrderPlacementView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if request.user.role != "BUYER":
+        if request.user.role != User.BUYER:
             return Response(
                 {"detail": "Only buyers can place orders."},
                 status=status.HTTP_403_FORBIDDEN,
