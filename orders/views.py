@@ -1,5 +1,8 @@
+from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import Prefetch
 from rest_framework import status
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -7,7 +10,14 @@ from rest_framework.views import APIView
 from farmers.models import Product
 
 from .models import Order, OrderItem
-from .serializers import OrderPlacementSerializer
+from .serializers import (
+    FarmerOrderSerializer,
+    FarmerOrderStatusSerializer,
+    OrderPlacementSerializer,
+)
+
+
+User = get_user_model()
 
 
 class OrderPlacementView(APIView):
@@ -80,4 +90,101 @@ class OrderPlacementView(APIView):
                 "price_at_order": product.price_per_unit,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class FarmerOrderPagination(PageNumberPagination):
+    page_size = 10
+
+
+class FarmerOrderListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role != User.FARMER:
+            return Response(
+                {"detail": "Only farmers can view farmer orders."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        farmer_items = (
+            OrderItem.objects
+            .filter(product__farmer=request.user)
+            .select_related("product")
+        )
+
+        orders = (
+            Order.objects
+            .filter(items__product__farmer=request.user)
+            .select_related("buyer")
+            .prefetch_related(
+                Prefetch(
+                    "items",
+                    queryset=farmer_items,
+                    to_attr="farmer_items",
+                )
+            )
+            .distinct()
+            .order_by("-created_at")
+        )
+
+        paginator = FarmerOrderPagination()
+        page = paginator.paginate_queryset(orders, request)
+
+        serializer = FarmerOrderSerializer(
+            page,
+            many=True,
+            context={"request": request},
+        )
+
+        return paginator.get_paginated_response(serializer.data)
+
+
+class FarmerOrderStatusUpdateView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def patch(self, request, order_id):
+        if request.user.role != User.FARMER:
+            return Response(
+                {"detail": "Only farmers can update order status."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            order = (
+                Order.objects
+                .filter(
+                    id=order_id,
+                    items__product__farmer=request.user,
+                )
+                .distinct()
+                .get()
+            )
+        except Order.DoesNotExist:
+            return Response(
+                {"detail": "Order not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = FarmerOrderStatusSerializer(
+            order,
+            data=request.data,
+            partial=True,
+        )
+
+        if not serializer.is_valid():
+            return Response(
+                serializer.errors,
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer.save()
+
+        return Response(
+            {
+                "message": "Order status updated successfully.",
+                "order_id": order.id,
+                "status": order.status,
+            },
+            status=status.HTTP_200_OK,
         )
