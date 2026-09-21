@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import F, Sum
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
@@ -18,11 +19,14 @@ from .serializers import (
 User = get_user_model()
 
 
+User = get_user_model()
+
+
 class OrderPlacementView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if request.user.role != "BUYER":
+        if request.user.role != User.BUYER:
             return Response(
                 {"detail": "Only buyers can place orders."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -58,21 +62,27 @@ class OrderPlacementView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        total_amount = product.price_per_unit * quantity
-
         with transaction.atomic():
             order = Order.objects.create(
                 buyer=request.user,
                 status="placed",
-                total_amount=total_amount,
             )
 
-            OrderItem.objects.create(
+            order_item = OrderItem.objects.create(
                 order=order,
                 product=product,
                 quantity=quantity,
                 price_at_order=product.price_per_unit,
             )
+
+            total_amount = order.items.aggregate(
+                total=Sum(
+                    F("quantity") * F("price_at_order")
+                )
+            )["total"]
+
+            order.total_amount = total_amount
+            order.save(update_fields=["total_amount"])
 
             product.quantity_available -= quantity
             product.save(update_fields=["quantity_available"])
@@ -84,8 +94,8 @@ class OrderPlacementView(APIView):
                 "status": order.status,
                 "total_amount": order.total_amount,
                 "product": product.name,
-                "quantity": quantity,
-                "price_at_order": product.price_per_unit,
+                "quantity": order_item.quantity,
+                "price_at_order": order_item.price_at_order,
             },
             status=status.HTTP_201_CREATED,
         )
