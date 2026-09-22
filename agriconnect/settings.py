@@ -45,7 +45,8 @@ INSTALLED_APPS = [
     'farmers',
     'buyers',
     'orders',
-    'accounts'
+    'accounts',
+    'ussd'
 ]
 AUTH_USER_MODEL = "accounts.User"
 
