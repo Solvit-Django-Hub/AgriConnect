@@ -1,6 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.db import transaction
-from django.db.models import Prefetch
+from django.db.models import F, Prefetch, Sum
 from rest_framework import status
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import IsAuthenticated
@@ -11,6 +11,7 @@ from farmers.models import Product
 
 from .models import Order, OrderItem
 from .serializers import (
+    BuyerOrderSerializer,
     FarmerOrderSerializer,
     FarmerOrderStatusSerializer,
     OrderPlacementSerializer,
@@ -24,7 +25,7 @@ class OrderPlacementView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        if request.user.role != "BUYER":
+        if request.user.role != User.BUYER:
             return Response(
                 {"detail": "Only buyers can place orders."},
                 status=status.HTTP_403_FORBIDDEN,
@@ -60,21 +61,27 @@ class OrderPlacementView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        total_amount = product.price_per_unit * quantity
-
         with transaction.atomic():
             order = Order.objects.create(
                 buyer=request.user,
                 status="placed",
-                total_amount=total_amount,
             )
 
-            OrderItem.objects.create(
+            order_item = OrderItem.objects.create(
                 order=order,
                 product=product,
                 quantity=quantity,
                 price_at_order=product.price_per_unit,
             )
+
+            total_amount = order.items.aggregate(
+                total=Sum(
+                    F("quantity") * F("price_at_order")
+                )
+            )["total"]
+
+            order.total_amount = total_amount
+            order.save(update_fields=["total_amount"])
 
             product.quantity_available -= quantity
             product.save(update_fields=["quantity_available"])
@@ -86,10 +93,80 @@ class OrderPlacementView(APIView):
                 "status": order.status,
                 "total_amount": order.total_amount,
                 "product": product.name,
-                "quantity": quantity,
-                "price_at_order": product.price_per_unit,
+                "quantity": order_item.quantity,
+                "price_at_order": order_item.price_at_order,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class BuyerOrderPagination(PageNumberPagination):
+    page_size = 10
+
+
+class BuyerOrderListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        if request.user.role != User.BUYER:
+            return Response(
+                {"detail": "Only buyers can view order history."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        orders = (
+            Order.objects
+            .filter(buyer=request.user)
+            .prefetch_related("items__product")
+            .order_by("-created_at")
+        )
+
+        paginator = BuyerOrderPagination()
+        page = paginator.paginate_queryset(orders, request)
+
+        serializer = BuyerOrderSerializer(
+            page,
+            many=True,
+            context={"request": request},
+        )
+
+        return paginator.get_paginated_response(serializer.data)
+
+
+class BuyerOrderDetailView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, order_id):
+        if request.user.role != User.BUYER:
+            return Response(
+                {"detail": "Only buyers can view order details."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        try:
+            order = (
+                Order.objects
+                .filter(
+                    id=order_id,
+                    buyer=request.user,
+                )
+                .prefetch_related("items__product")
+                .get()
+            )
+        except Order.DoesNotExist:
+            return Response(
+                {"detail": "Order not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        serializer = BuyerOrderSerializer(
+            order,
+            context={"request": request},
+        )
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_200_OK,
         )
 
 
